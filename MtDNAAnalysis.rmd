@@ -1,0 +1,283 @@
+---
+title: "Heteroplasmy analysis"
+author: "Marta Coronado Zamora"
+date: "23/7/2018"
+output: 
+  html_document:
+  theme: cerulean
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(shiny)
+require(shinythemes)
+require(shinyFiles)
+require(ggplot2)
+require(kableExtra)
+require(plotly)
+require(reshape2)
+```
+
+This R Markdown document is made interactive using Shiny for the analysis of <b>heteroplasmy in mitochondrial samples</b>. The program analyses the results provided by the [mtDNA-Server](https://mtdna-server.uibk.ac.at), allowing a simple and interactive visualization of the level of heteroplasmy, variants and haplogroups across all individuals.
+
+```{r dataPath, echo=FALSE}
+path_files <- "D:/ANA/Analisis MI/Juntos" # Change the working directory
+```
+The working directory is `r path_files`.
+
+```{r loadData, echo=FALSE}
+#First of all, it is needed to load the required data: the haplogroups, heteroplasmies and variant files for all the individuals. 
+
+# Reading variant.txt file 
+filenames <- list.files(path=path_files,
+                      recursive=T,
+                      pattern="variants.txt",
+                      full.names=T)
+variants_list <- lapply(filenames, read.table, sep="\t", header=T, stringsAsFactors = F)
+variants_data <- do.call(rbind.data.frame,variants_list)
+variants_data$ID<-sub("_.*", "", variants_data$ID)
+write.table(variants_data,file=paste0(path_files,"/homoplasmias_alldata.txt"),quote=F,row.names = F,sep="\t")
+
+# Reading haplogroups.txt file 
+filenames <- list.files(path=path_files,
+                      recursive=T,
+                      pattern="haplogroups.txt",
+                      full.names=T)
+haplogroups_list <- lapply(filenames, read.table, sep="\t", header=T, stringsAsFactors = F)
+haplogroups_data <- do.call(rbind.data.frame,haplogroups_list)
+haplogroups_data$SampleID<-sub("_.*", "", haplogroups_data$SampleID)
+write.table(haplogroups_data,file=paste0(path_files,"/haplogroups_alldata.txt"),quote=F,row.names = F,sep="\t")
+
+# Reading heteroplasmies.txt file 
+filenames <- list.files(path=path_files,
+                      recursive=T,
+                      pattern="heteroplasmies.txt",
+                      full.names=T)
+heteroplasmies_list <- lapply(filenames, read.table, sep="\t", header=T, stringsAsFactors = F)
+heteroplasmies_data <- do.call(rbind.data.frame,heteroplasmies_list)
+heteroplasmies_data$ID<-sub("_.*", "", heteroplasmies_data$ID)
+# CAMBIAR EL PORCENTAJE DE HETEROPLASMIA AQU?
+heteroplasmy_level <- 0.03 # 0.03 por otro n?mero!
+
+heteroplasmies_data <- subset(heteroplasmies_data, heteroplasmies_data$HET.LEVEL > heteroplasmy_level)
+
+# Generate the % of HET.LEVEL, %A, %C, %G and T% (dividing by 100):
+# heteroplasmies_data$HET.LEVEL <- heteroplasmies_data$HET.LEVEL/100
+# heteroplasmies_data$X.A <- heteroplasmies_data$X.A/100
+# heteroplasmies_data$X.T <- heteroplasmies_data$X.T/100
+# heteroplasmies_data$X.G <- heteroplasmies_data$X.G/100
+# heteroplasmies_data$X.C <- heteroplasmies_data$X.C/100
+
+write.table(heteroplasmies_data,file=paste0(path_files,"/heteroplasmies_alldata.txt"),quote=F,row.names = F,sep="\t")
+
+#variants_data, haplogroups_data and heteroplasmies_data contain all the information for all the individuals analyzed.
+```
+
+## Variant analysis
+
+The following graph represents the total variants analyzed and the number of individuals that have them.
+
+```{r variantsAnalysis, echo=F}
+
+p<-ggplot(variants_data, aes(as.factor(POS),fill=ID)) +
+   geom_bar() + xlab("Position") + ylab("Count") + theme_classic() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+ggplotly(p,width = 1000,autosize=T)
+
+variant_table <-as.data.frame(table(variants_data$POS))
+colnames(variant_table) <- c("Variant", "Number of individuals")
+write.table(variant_table,file=paste0(path_files,"/variants_table.txt"),quote=F,row.names = F,sep="\t")
+
+variants_pos_id <- variants_data[,c(1,2)]
+variants_pos_id$VARIANT <- 1
+variants_presence <-dcast(variants_pos_id, ID ~ POS, value.var = "VARIANT", fill=0)
+write.table(variants_presence,file=paste0(path_files,"/variants_presence.txt"),quote=F,row.names = F,sep="\t")
+
+variants_pos_id<-variants_pos_id[,c(1,2)]
+variants_pos_id$id_ind <- do.call(rbind.data.frame, strsplit(variants_pos_id$ID,"[A-Z]+"))[,2]
+variants_pos_id$control_case <- do.call(rbind.data.frame, strsplit(variants_pos_id$ID,"[0-9]+"))[,1]
+variants_pos_id$pos_control_case <- paste0(variants_pos_id$POS,variants_pos_id$control_case)
+variants_pos_id<-variants_pos_id[,c(3,5)]
+variants_pos_id$var <- 1
+variants_presence2 <-dcast(variants_pos_id, id_ind ~ pos_control_case, value.var = "var", fill=0)
+write.table(variants_presence2,file=paste0(path_files,"/variants_presence_control_case.txt"),quote=F,row.names = F,sep="\t")
+
+```
+
+A total of <b>`r length(unique(variants_data$POS))` different variants </b> are detected.
+
+This table contains the different variants analyzed and the number of individuals that have them:
+
+`r kable(variant_table, "html") %>%
+  kable_styling(full_width = F) %>%
+  scroll_box(height = "250px")`
+
+```{r variantsAnalysisDetails, echo=F}
+inputPanel(selectInput("ID", label = "Individual ID: ", 
+           choices = as.character(unique(variants_data$ID))))
+# save a file with ID and the variants
+df_variants<-NULL
+df_variants[['ID']]<-NULL
+df_variants[['pos']]<-NULL
+
+for (ID in unique(variants_data$ID)){
+  tmp <- c(ID,paste(variants_data[variants_data$ID==ID,]$POS,sep=',',collapse = ','))
+  df_variants<-rbind(df_variants,tmp)
+}
+rownames(df_variants)<-NULL
+colnames(df_variants)<-c('ID','variants')
+df_variants <- as.data.frame(df_variants)
+write.table(df_variants,file = paste0(path_files,"/homoplasmies_by_ID.txt"),quote=F,row.names = F,sep="\t")
+```
+
+The number of variants that <b> `r renderText(input$ID)`</b>  has is <b>  `r renderText(length((variants_data[variants_data$ID==input$ID,]$POS)))`</b> in positions <b> `r renderText((variants_data[variants_data$ID==input$ID,]$POS))`</b>.
+
+```{r analysisForMitoMaster, echo=F}
+
+```
+
+## Haplogroups analysis
+
+The following graph represents the total haplogroups analyzed and the individuals that have them.
+
+```{r haplogroupAnalysis, echo=F}
+p<-ggplot(haplogroups_data, aes(as.factor(Haplogroup),fill=SampleID)) +
+   geom_bar() + xlab("Haplogroup") + ylab("Count") + theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+ggplotly(p,width = 1000) 
+
+haplogroup_table <-as.data.frame(table(haplogroups_data$Haplogroup))
+colnames(haplogroup_table) <- c("Haplogroup", "Number of individuals")
+
+kable(haplogroup_table, "html") %>%
+  kable_styling(full_width = F) %>%
+  scroll_box(height = "250px")
+
+write.table(haplogroup_table,file=paste0(path_files,"/haplogroups_table.txt"),quote=F,row.names = F,sep="\t")
+
+haplogroup_pos_id <- haplogroups_data[,c(1,3)]
+haplogroup_pos_id$var<-1
+haplogroup_presence <-dcast(haplogroup_pos_id, SampleID ~ Haplogroup, value.var = "var", fill=0)
+write.table(haplogroup_presence,file=paste0(path_files,"/haplogroup_presence.txt"),quote=F,row.names = F,sep="\t")
+
+haplogroup_pos_id<-haplogroup_pos_id[,c(1,2)]
+haplogroup_pos_id$id_ind <- do.call(rbind.data.frame, strsplit(haplogroup_pos_id$SampleID,"[A-Z]+"))[,2]
+haplogroup_pos_id$control_case <- do.call(rbind.data.frame, strsplit(haplogroup_pos_id$SampleID,"[0-9]+"))[,1]
+haplogroup_pos_id$pos_control_case <- paste0(haplogroup_pos_id$Haplogroup,haplogroup_pos_id$control_case)
+haplogroup_pos_id<-haplogroup_pos_id[,c(3,5)]
+haplogroup_pos_id$var<-1
+haplogroup_presence2 <-dcast(haplogroup_pos_id, id_ind ~ pos_control_case, value.var = "var", fill=0)
+write.table(haplogroup_presence2,file=paste0(path_files,"/haplogroups_presence_control_case.txt"),quote=F,row.names = F,sep="\t")
+
+```
+
+A total of <b> `r length(unique(haplogroups_data$Haplogroup))` different haplogroups</b>  are detected.
+
+```{r haplogroupAnalysisDetails, echo=F}
+inputPanel(selectInput("ID3", label = "Individual ID: ", 
+           choices = as.character(unique(haplogroups_data$SampleID))))
+
+# save a file with ID and the variants
+df_haplogroups<-NULL
+df_haplogroups[['ID']]<-NULL
+df_haplogroups[['pos']]<-NULL
+
+for (ID in unique(haplogroups_data$SampleID)){
+  tmp <- c(ID,paste(haplogroups_data[haplogroups_data$SampleID==ID,]$Haplogroup,sep=',',collapse = ','))
+  df_haplogroups<-rbind(df_haplogroups,tmp)
+}
+rownames(df_haplogroups)<-NULL
+colnames(df_haplogroups)<-c('ID','haplogroups')
+df_haplogroups <- as.data.frame(df_haplogroups)
+
+write.table(df_haplogroups,file = paste0(path_files,"/haplogroups_by_ID.txt"),quote=F,row.names = F,sep="\t")
+```
+The number of haplogroups that <b>`r renderText(input$ID3)`</b> has is  <b>`r renderText(length(haplogroups_data[haplogroups_data$SampleID==input$ID3,]$Haplogroup))`</b>(<b>`r renderText(as.character((haplogroups_data[haplogroups_data$SampleID==input$ID3,]$Haplogroup)))`</b>).
+
+## Heteroplasmies analysis
+
+The following graph represents the total heteroplasmies detected and the individuals that have them.
+
+```{r heteroplasmiesAnalysis, echo=F}
+
+p<-ggplot(heteroplasmies_data, aes(as.factor(POS),fill=ID)) +
+   geom_bar() + xlab("Position") + ylab("Count") + theme_classic()+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+ggplotly(p,width = 1000,autosize=T)
+
+heteroplasmies_table <-as.data.frame(table(heteroplasmies_data$POS))
+colnames(heteroplasmies_table) <- c("Position", "Number of individuals")
+
+kable(heteroplasmies_table, "html") %>%
+  kable_styling(full_width = F) %>%
+  scroll_box(height = "250px")
+
+write.table(heteroplasmies_table,file=paste0(path_files,"/heteroplasmies_table.txt"),quote=F,row.names = F,sep="\t")
+
+heteroplasmies_pos_id <- heteroplasmies_data[,c(1,2,3,4,5)]
+heteroplasmies_pos_id$rCRS <- as.character(heteroplasmies_pos_id$rCRS)
+heteroplasmies_pos_id$TOP.BASE.FWD <- as.character(heteroplasmies_pos_id$TOP.BASE.FWD)
+heteroplasmies_pos_id$MINOR.BASE.FWD <- as.character(heteroplasmies_pos_id$MINOR.BASE.FWD)
+
+for (i in 1:length(heteroplasmies_pos_id$ID)) {
+  if (heteroplasmies_pos_id$rCRS[i] == heteroplasmies_pos_id$TOP.BASE.FWD[i]) { heteroplasmies_pos_id$ref_mut[i]<-(paste0(heteroplasmies_pos_id$TOP.BASE.FWD[i],tolower(heteroplasmies_pos_id$MINOR.BASE.FWD[i]))) 
+  }
+  else if (heteroplasmies_pos_id$rCRS[i] == heteroplasmies_pos_id$MINOR.BASE.FWD[i]) { heteroplasmies_pos_id$ref_mut[i]<-(paste0(tolower(heteroplasmies_pos_id$MINOR.BASE.FWD[i]),heteroplasmies_pos_id$TOP.BASE.FWD[i]))  
+  }
+}
+
+heteroplasmies_presence<-dcast(heteroplasmies_pos_id, ID ~ POS, value.var ="ref_mut",fill=0) #enseñar minoritaria y en minuscula y mayoritaria en mayuscula y q la primera base sea la de referencia 
+write.table(heteroplasmies_presence,file=paste0(path_files,"/heteroplasmies_presence.txt"),quote=F,row.names = F,sep="\t")
+
+heteroplasmies_pos_id$id_ind <- do.call(rbind.data.frame, strsplit(heteroplasmies_pos_id$ID,"[A-Z]+"))[,2]
+heteroplasmies_pos_id$control_case <- do.call(rbind.data.frame, strsplit(heteroplasmies_pos_id$ID,"[0-9]+"))[,1]
+heteroplasmies_pos_id$pos_control_case <- paste0(heteroplasmies_pos_id$POS,heteroplasmies_pos_id$control_case)
+heteroplasmies_pos_id<-heteroplasmies_pos_id[,c(7,9)]
+heteroplasmies_pos_id$var<-1
+heteroplasmies_presence2 <-dcast(heteroplasmies_pos_id, id_ind ~ pos_control_case, value.var = "var", fill=0)
+write.table(heteroplasmies_presence2,file=paste0(path_files,"/heteroplasmies_presence_control_case.txt"),quote=F,row.names = F,sep="\t")
+
+```
+
+A total of `r length(unique(heteroplasmies_data$POS))` different heteroplasmies are detected.
+
+```{r heteroplasmiesAnalysisDetails, echo=F}
+inputPanel(selectInput("ID2", label = "Individual ID: ", 
+           choices = as.character(unique(heteroplasmies_data$ID))))
+
+# save a file with ID and the variants
+df_heteroplasmies<-NULL
+df_heteroplasmies[['ID']]<-NULL
+df_heteroplasmies[['pos']]<-NULL
+
+for (ID in unique(heteroplasmies_data$ID)){
+  tmp <- c(ID,paste(heteroplasmies_data[heteroplasmies_data$ID==ID,]$POS,sep=',',collapse = ','))
+  df_heteroplasmies<-rbind(df_heteroplasmies,tmp)
+}
+rownames(df_heteroplasmies)<-NULL
+colnames(df_heteroplasmies)<-c('ID','heteroplasmies')
+df_heteroplasmies <- as.data.frame(df_heteroplasmies)
+write.table(df_heteroplasmies,file = paste0(path_files,"/heteroplasmies_by_ID.txt"),quote=F,row.names = F,sep="\t")
+```
+The number of heteroplasmies that <b>`r renderText(input$ID2)`</b> has is: <b>`r renderText(length(heteroplasmies_data[heteroplasmies_data$ID==input$ID2,]$POS))`</b> in positions <b>`r renderText(heteroplasmies_data[heteroplasmies_data$ID==input$ID2,]$POS)`</b>.
+
+Taking into account the <b>heteroplasmy level (%)</b>: 
+```{r heteroplasmiesAnalysisLevel, echo=F}
+
+inputPanel(
+  sliderInput("percentatge", label = "Frequency: ",
+              min=0,max=10, value=0.05,step=0.2)
+)
+
+renderTable(heteroplasmies_data[heteroplasmies_data$HET.LEVEL>=input$percentatge,c(1,2,11)])
+
+
+```
+
+```{r final file, echo=F}
+tmp<-merge(variants_presence,heteroplasmies_presence,by="ID",all=T) 
+final<-merge(tmp,haplogroup_presence,by.x="ID",by.y="SampleID",all=T)
+write.table(final,file = paste0(path_files,"final.txt"),quote=F,row.names = F,sep="\t")
+
+```
